@@ -1,13 +1,29 @@
-# Copyright 2020-2025 by Thomas Dalla Piazza. All rights reserved. This file is part
-# of the Automated Printer project, released under the MIT License. Please
-# see the LICENSE file included as part of this package.
+# Copyright 2025 Thomas Dalla Piazza.
 #
-# author:   Thomas Dalla Piazza
-# created:  2025-04-10
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
 
 import asyncio
 import logging
+
+# https://github.com/cmroche/moonraker-api
+# a good code quality project example https://github.com/straga/klipmi/blob/09ae17c51506a776897001c866d2d40cf97d23ec/src/klipmi/model/printer.py#L24
 
 from moonraker_api import MoonrakerClient, MoonrakerListener
 from moonraker_api.const import (
@@ -29,6 +45,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class MoonrakerBridge(MoonrakerListener):
+
     def __init__(self):
         self.running = False
         self.client = MoonrakerClient(
@@ -44,6 +61,7 @@ class MoonrakerBridge(MoonrakerListener):
 
     async def stop(self) -> None:
         """Stop the websocket connection."""
+        _LOGGER.info('Stopping')
         self.running = False
         await self.client.disconnect()
 
@@ -57,7 +75,13 @@ class MoonrakerBridge(MoonrakerListener):
         elif state == WEBSOCKET_STATE_STOPPING:
             pass
         elif state == WEBSOCKET_STATE_STOPPED:
-            _LOGGER.info('Websocket closed. Stopping services')
+            _LOGGER.info('Websocket closed. Try to reconnect...')
+            if self.running:
+                self.running = False
+                _LOGGER.info('Disconnected.')
+                _LOGGER.info('Re-connect...')
+            await asyncio.sleep(2)
+            await self.start()
             pass
 
     async def on_exception(self, exception: BaseException) -> None:
@@ -87,8 +111,10 @@ async def main():
 
     response = await bridge.client.call_method('printer.info')
     _LOGGER.info(response)
-    await bridge.stop()
+    # await bridge.stop()
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    asyncio.ensure_future(main(), loop=loop)
+    loop.run_forever()
