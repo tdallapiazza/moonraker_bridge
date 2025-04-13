@@ -20,13 +20,17 @@
 
 
 import asyncio
+from enum import StrEnum
 import logging
 
 # https://github.com/cmroche/moonraker-api
-# a good code quality project example https://github.com/straga/klipmi/blob/09ae17c51506a776897001c866d2d40cf97d23ec/src/klipmi/model/printer.py#L24
+# a good code quality project example https://github.com/frap129/klipmi
+
+from typing import Callable, Coroutine, Dict, List, Literal
 
 from moonraker_api import MoonrakerClient, MoonrakerListener
 from moonraker_api.const import (
+    WEBSOCKET_CONNECTION_TIMEOUT,
     WEBSOCKET_STATE_CONNECTED,
     WEBSOCKET_STATE_CONNECTING,
     WEBSOCKET_STATE_STOPPED,
@@ -36,12 +40,21 @@ from moonraker_api.websockets.websocketclient import (
     ClientNotAuthenticatedError,
 )
 
+
 logging.basicConfig(
     level=logging.WARNING, format='%(name)s - %(levelname)s - %(message)s'
 )
 logging.getLogger('moonraker_api').setLevel(logging.INFO)
 logging.getLogger(__name__).setLevel(logging.INFO)
 _LOGGER = logging.getLogger(__name__)
+
+
+class PrinterState(StrEnum):
+    NOT_READY = 'not ready'
+    READY = 'ready'
+    STOPPED = 'stopped'
+    MOONRAKER_ERR = 'moonraker error'
+    KLIPPER_ERR = 'klipper error'
 
 
 class MoonrakerBridge(MoonrakerListener):
@@ -53,36 +66,57 @@ class MoonrakerBridge(MoonrakerListener):
             'localhost',
             7125,
         )
+        self.objects = {
+            'gcode_move': ['extrude_factor', 'speed_factor', 'homing_origin'],
+            'motion_report': ['live_position', 'live_velocity'],
+            'webhooks': ['state', 'state_message'],
+            'fan': ['speed'],
+            'heater_fan hotend_fan': ['speed'],
+            'heater_bed': ['temperature', 'target', 'power'],
+            'extruder': ['temperature', 'target', 'power'],
+            'filament_switch_sensor Filament_Runout_Sensor': ['filament_detected'],
+            'display_status': ['progress'],
+            'print_stats': [
+                'state',
+                'print_duration',
+                'filename',
+                'total_duration',
+                'info',
+            ],
+        }
 
     async def start(self) -> None:
         """Start the websocket connection."""
         self.running = True
+        self.state = PrinterState.NOT_READY
         return await self.client.connect()
 
     async def stop(self) -> None:
         """Stop the websocket connection."""
         _LOGGER.info('Stopping')
         self.running = False
+        await self.__updateState(PrinterState.STOPPED)
         await self.client.disconnect()
 
     async def state_changed(self, state: str) -> None:
         """Notifies of changing websocket state."""
         _LOGGER.debug('Stated changed to %s', state)
+        tasks: List[Coroutine] = []
+        printerStatus = PrinterState.NOT_READY
         if state == WEBSOCKET_STATE_CONNECTING:
             pass
         elif state == WEBSOCKET_STATE_CONNECTED:
-            pass
+            tasks.append(self.__subscribe())
+            tasks.append(self.__updateKlippyStatus())
         elif state == WEBSOCKET_STATE_STOPPING:
             pass
         elif state == WEBSOCKET_STATE_STOPPED:
-            _LOGGER.info('Websocket closed. Try to reconnect...')
-            if self.running:
-                self.running = False
-                _LOGGER.info('Disconnected.')
-                _LOGGER.info('Re-connect...')
-            await asyncio.sleep(2)
-            await self.start()
-            pass
+            _LOGGER.info('Websocket closed')
+            printerStatus = PrinterState.STOPPED
+        elif state == WEBSOCKET_CONNECTION_TIMEOUT:
+            printerStatus = PrinterState.MOONRAKER_ERR
+        tasks.append(self.__updateState(printerStatus))
+        asyncio.gather(*tasks)
 
     async def on_exception(self, exception: BaseException) -> None:
         """Notifies of exceptions from the websocket run loop."""
@@ -103,6 +137,9 @@ class MoonrakerBridge(MoonrakerListener):
             timestamp = data[1]
             _LOGGER.info('Received status update notnificatio %s -> %s', timestamp, message)
             # await self.process_status_message(message, timestamp)
+
+    async def __subscribe(self):
+        await self.client.call_method('printer.objects.subscribe', objects=self.objects)
 
 
 async def main():
