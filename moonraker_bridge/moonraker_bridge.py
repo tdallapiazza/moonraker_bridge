@@ -39,6 +39,7 @@ from moonraker_api.const import (
 from moonraker_api.websockets.websocketclient import (
     ClientNotAuthenticatedError,
 )
+from utils import updateNestedDict
 
 
 logging.basicConfig(
@@ -56,11 +57,20 @@ class PrinterState(StrEnum):
     MOONRAKER_ERR = 'moonraker error'
     KLIPPER_ERR = 'klipper error'
 
+class Notifications(StrEnum):
+    KLIPPY_READY = "notify_klippy_ready"
+    KLIPPY_SHUTDOWN = "notify_klippy_shutdown"
+    KLIPPY_DISCONNECTED = "notify_klippy_shutdown"
+    STATUS_UPDATE = "notify_status_update"
+    GCODE_RESPONSE = "notify_gcode_response"
+    FILES_CHANGED = "notify_filelist_changed"
 
 class MoonrakerBridge(MoonrakerListener):
 
     def __init__(self):
         self.running = False
+        self.status: dict = {}
+        self.files: dict = {}
         self.client = MoonrakerClient(
             self,
             'localhost',
@@ -107,7 +117,6 @@ class MoonrakerBridge(MoonrakerListener):
             pass
         elif state == WEBSOCKET_STATE_CONNECTED:
             tasks.append(self.__subscribe())
-            tasks.append(self.__updateKlippyStatus())
         elif state == WEBSOCKET_STATE_STOPPING:
             pass
         elif state == WEBSOCKET_STATE_STOPPED:
@@ -116,30 +125,48 @@ class MoonrakerBridge(MoonrakerListener):
         elif state == WEBSOCKET_CONNECTION_TIMEOUT:
             printerStatus = PrinterState.MOONRAKER_ERR
         tasks.append(self.__updateState(printerStatus))
-        asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
     async def on_exception(self, exception: BaseException) -> None:
         """Notifies of exceptions from the websocket run loop."""
         _LOGGER.debug('Received exception from API websocket %s', str(exception))
-        if isinstance(exception, ClientNotAuthenticatedError):
-            self.entry.async_start_reauth(self.hass)
-        else:
-            raise exception
+        raise exception
 
     async def on_notification(self, method: str, data: any) -> None:
         """Notifies of state updates."""
-        if method != 'notify_proc_stat_update':
-            _LOGGER.debug('Received notification %s -> %s', method, data)
+        tasks: List[Coroutine] = []
+        if method == Notifications.KLIPPY_READY:
+            tasks.append(self.__updatePrinterStatus())
+            tasks.append(self.__subscribe())
+            tasks.append(self.__updateKlippyStatus())
+            tasks.append(self.__updateState(PrinterState.READY))
+        elif method == Notifications.KLIPPY_SHUTDOWN:
+            tasks.append(self.__updateState(PrinterState.KLIPPER_ERR))
+        elif method == Notifications.KLIPPY_DISCONNECTED:
+            tasks.append(self.__updateState(PrinterState.KLIPPER_ERR))
+        elif method == Notifications.STATUS_UPDATE:
+            updateNestedDict(self.status, data[0])
+            tasks.append(self.printer_callback(self.status))
+        elif method == Notifications.FILES_CHANGED:
+            self.files = data[0]
+            tasks.append(self.files_callback(self.files))
+        await asyncio.gather(*tasks)
 
-        # Subscription notifications
-        if method == 'notify_status_update':
-            message = data[0]
-            timestamp = data[1]
-            _LOGGER.info('Received status update notnificatio %s -> %s', timestamp, message)
-            # await self.process_status_message(message, timestamp)
+    def state_callback(self, state):
+        _LOGGER.info('Callback: State changed to %s', state)
+
+    def printer_callback(self, status):
+        _LOGGER.info('got status: %s', status)
+
+    def files_callback(self, files):
+        _LOGGER.info('Files callback triggered but not implemented')
 
     async def __subscribe(self):
         await self.client.call_method('printer.objects.subscribe', objects=self.objects)
+
+    async def __updateState(self, state: PrinterState):
+        self.state = state
+        self.state_callback(state)
 
 
 async def main():
@@ -152,6 +179,11 @@ async def main():
 
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    asyncio.ensure_future(main(), loop=loop)
-    loop.run_forever()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        asyncio.ensure_future(main(), loop=loop)
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+    
