@@ -79,7 +79,6 @@ class MoonrakerBridge(MoonrakerListener):
         self.objects = {
             'gcode_move': ['extrude_factor', 'speed_factor', 'homing_origin'],
             'motion_report': ['live_position', 'live_velocity'],
-            'webhooks': ['state', 'state_message'],
             'fan': ['speed'],
             'heater_fan hotend_fan': ['speed'],
             'heater_bed': ['temperature', 'target', 'power'],
@@ -117,6 +116,7 @@ class MoonrakerBridge(MoonrakerListener):
             pass
         elif state == WEBSOCKET_STATE_CONNECTED:
             tasks.append(self.__subscribe())
+            tasks.append(self.__updateKlippyStatus())
         elif state == WEBSOCKET_STATE_STOPPING:
             pass
         elif state == WEBSOCKET_STATE_STOPPED:
@@ -163,19 +163,29 @@ class MoonrakerBridge(MoonrakerListener):
 
     async def __subscribe(self):
         await self.client.call_method('printer.objects.subscribe', objects=self.objects)
+        _LOGGER.info('Subscriptions setup.')
 
     async def __updateState(self, state: PrinterState):
         self.state = state
         self.state_callback(state)
+    
+    async def __updateKlippyStatus(self):
+        status = await self.client.get_klipper_status()
+        if status == "ready":
+            await self.__updatePrinterStatus()
+            await self.state_callback(PrinterState.READY)
+        elif status == "shutdown" or status == "disconnected":
+            await self.state_callback(PrinterState.KLIPPER_ERR)
+
+    async def __updatePrinterStatus(self):
+        self.status = (
+            await self.client.call_method("printer.objects.query", objects=self.objects)
+        )["status"]
 
 
 async def main():
     bridge = MoonrakerBridge()
     await bridge.start()
-
-    response = await bridge.client.call_method('printer.info')
-    _LOGGER.info(response)
-    # await bridge.stop()
 
 
 if __name__ == '__main__':
