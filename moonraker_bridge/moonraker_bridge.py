@@ -58,10 +58,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
     def __init__(self):
         super().__init__('moonraker_publisher')
-        self.publisher_ = self.create_publisher(String, 'topic', 10)
-        timer_period = 0.5  # seconds
-        self.timer = self.create_timer(timer_period, self.timer_callback)
-        self.i = 0
+        self.printer_state_publisher_ = self.create_publisher(PrinterState, 'printer/state', 10)
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
@@ -89,18 +86,12 @@ class MoonrakerBridge(MoonrakerListener,Node):
             ],
         }
 
-    def timer_callback(self):
-        msg = String()
-        msg.data = 'Hello World: %d' % self.i
-        self.publisher_.publish(msg)
-        self.get_logger().info('Publishing: "%s"' % msg.data)
-        self.i += 1
-
 
     async def start(self) -> None:
         """Start the websocket connection."""
         self.running = True
         self.state = PrinterState.NOT_READY
+        self.prev_state = PrinterState.NOT_READY
         return await self.client.connect()
 
     async def stop(self) -> None:
@@ -122,7 +113,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         elif state == WEBSOCKET_STATE_STOPPING:
             pass
         elif state == WEBSOCKET_STATE_STOPPED:
-            _LOGGER.warning('Websocket closed')
+            self.get_logger().warning('Websocket closed')
             printerState = PrinterState.STOPPED
         elif state == WEBSOCKET_CONNECTION_TIMEOUT:
             printerState = PrinterState.MOONRAKER_ERR
@@ -131,7 +122,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
     async def on_exception(self, exception: BaseException) -> None:
         """Notifies of exceptions from the websocket run loop."""
-        _LOGGER.debug('Received exception from API websocket %s', str(exception))
+        self.get_logger().warning('Received exception from API websocket %s', str(exception))
         raise exception
 
     async def on_notification(self, method: str, data: any) -> None:
@@ -154,7 +145,12 @@ class MoonrakerBridge(MoonrakerListener,Node):
         await asyncio.gather(*tasks)
 
     def state_callback(self, state):
-        self.get_logger().info('State changed to %s' % (state))
+        msg = PrinterState()
+        msg.stamp = self.get_clock().now().to_msg()
+        msg.previous_state=self.prev_state
+        msg.current_state = state
+        self.printer_state_publisher_.publish(msg)
+        self.get_logger().info('Publishing PrinterState message : %s' % (msg.current_state))
 
     def printer_callback(self, status):
         self.get_logger().info('Got status: %s' % (status))
@@ -168,6 +164,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
     async def __updateState(self, state: PrinterState):
         if state != self.state:
+            self.prev_state = self.state
             self.state = state
             self.state_callback(state)
     
@@ -176,10 +173,10 @@ class MoonrakerBridge(MoonrakerListener,Node):
         if state == "ready":
             self.get_logger().info('The printer is ready')
             await self.__updatePrinterStatus()
-            await self.state_callback(PrinterState.READY)
+            await self.__updateState(PrinterState.READY)
         elif state == "shutdown" or state == "disconnected":
             self.get_logger().warning('The printer is on error!')
-            await self.state_callback(PrinterState.KLIPPER_ERR)
+            await self.__updateState(PrinterState.KLIPPER_ERR)
 
     async def __updatePrinterStatus(self):
         self.get_logger().info('Querying printer status')
