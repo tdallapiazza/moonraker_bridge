@@ -47,6 +47,7 @@ from printer_interfaces.msg import PrinterState
 from printer_interfaces.msg import HeaterBed
 from printer_interfaces.msg import Extruder
 from printer_interfaces.msg import MotionReport
+from printer_interfaces.msg import Fans
 
 
 class Notifications(StrEnum):
@@ -65,6 +66,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.heater_bed_publisher_ = self.create_publisher(HeaterBed, 'printer/heater_bed', 10)
         self.extruder_publisher_ = self.create_publisher(Extruder, 'printer/extruder', 10)
         self.motion_report_publisher_ = self.create_publisher(MotionReport, 'printer/motion_report', 10)
+        self.fans_publisher_ = self.create_publisher(Fans, 'printer/fans', 10)
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
@@ -202,6 +204,15 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.motion_report_publisher_.publish(msg)
         self.get_logger().info('Publishing MotionReport message : %s' % (msg))
 
+    def publish_fans(self, time):
+        msg = Fans()
+        msg.stamp = time.to_msg()
+        msg.piece_cooling_fan_speed = self.status['fan']['speed']
+        msg.heater_fan_speed = self.status['heater_fan heater_fan']['speed']
+        msg.controller_fan_speed = self.status['controller_fan controller_fan']['speed']
+        self.fans_publisher_.publish(msg)
+        self.get_logger().info('Publishing Fans message : %s' % (msg))
+
     def printer_callback(self, keys, time):
         for key in keys:
             if key == 'heater_bed':
@@ -210,6 +221,8 @@ class MoonrakerBridge(MoonrakerListener,Node):
                 self.publish_extruder(time)
             elif key == 'motion_report':
                 self.publish_motion_report(time)
+            elif key == 'fan' or key == 'heater_fan heater_fan' or key == 'controller_fan controller_fan':
+                self.publish_fans(time)
             else:
                 self.get_logger().warning('No publisher implemented for key: %s' % (key))
 
