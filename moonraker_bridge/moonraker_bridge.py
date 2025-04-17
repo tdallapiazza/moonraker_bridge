@@ -44,14 +44,7 @@ import rclpy
 from rclpy.node import Node
 
 from std_msgs.msg import String
-
-
-class PrinterState(StrEnum):
-    NOT_READY = 'not ready'
-    READY = 'ready'
-    STOPPED = 'stopped'
-    MOONRAKER_ERR = 'moonraker error'
-    KLIPPER_ERR = 'klipper error'
+from printer_interfaces.msg import PrinterState 
 
 class Notifications(StrEnum):
     KLIPPY_READY = "notify_klippy_ready"
