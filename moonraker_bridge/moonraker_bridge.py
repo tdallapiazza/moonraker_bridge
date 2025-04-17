@@ -91,16 +91,27 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
     async def start(self) -> None:
         """Start the websocket connection."""
-        self.running = True
-        self.state = PrinterState.NOT_READY
-        self.prev_state = PrinterState.NOT_READY
-        return await self.client.connect()
+        conn=False
+        try:
+            conn = await self.client.connect()
+        except:
+            self.get_logger().warning('Could note connect to server. Retry in 5sec')
+            await asyncio.sleep(5)
+            await self.start()
+        else:
+            self.get_logger().info('Connection to server successfull')
+            self.running = True
+            self.state = PrinterState.NOT_READY
+            self.prev_state = PrinterState.NOT_READY
+        return conn
 
     async def stop(self) -> None:
         """Stop the websocket connection."""
         self.running = False
         await self.__updateState(PrinterState.STOPPED)
         await self.client.disconnect()
+        # try to re-connect
+        await self.start()
 
     async def state_changed(self, state: str) -> None:
         """Notifies of changing websocket state."""
@@ -116,6 +127,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
             pass
         elif state == WEBSOCKET_STATE_STOPPED:
             self.get_logger().warning('Websocket closed')
+            tasks.append(self.stop())
             printerState = PrinterState.STOPPED
         elif state == WEBSOCKET_CONNECTION_TIMEOUT:
             printerState = PrinterState.MOONRAKER_ERR
@@ -202,7 +214,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
             await self.client.call_method("printer.objects.query", objects=self.objects)
         )["status"]
         self.get_logger().debug('Printer status obtained:\n %s' % (self.status))
-        self.publish_heater_bed(self.get_clock().now())
+        self.printer_callback(self.objects.keys(),self.get_clock().now())
         
 
 
