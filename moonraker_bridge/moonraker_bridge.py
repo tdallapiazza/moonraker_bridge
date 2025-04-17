@@ -46,6 +46,8 @@ from rclpy.node import Node
 from printer_interfaces.msg import PrinterState
 from printer_interfaces.msg import HeaterBed
 from printer_interfaces.msg import Extruder
+from printer_interfaces.msg import MotionReport
+
 
 class Notifications(StrEnum):
     KLIPPY_READY = "notify_klippy_ready"
@@ -62,6 +64,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.printer_state_publisher_ = self.create_publisher(PrinterState, 'printer/state', 10)
         self.heater_bed_publisher_ = self.create_publisher(HeaterBed, 'printer/heater_bed', 10)
         self.extruder_publisher_ = self.create_publisher(Extruder, 'printer/extruder', 10)
+        self.motion_report_publisher_ = self.create_publisher(MotionReport, 'printer/motion_report', 10)
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
@@ -71,7 +74,6 @@ class MoonrakerBridge(MoonrakerListener,Node):
             7125,
         )
         self.objects = {
-            'gcode_move': ['extrude_factor', 'speed_factor', 'homing_origin'],
             'motion_report': ['live_position', 'live_velocity'],
             'fan': ['speed'],
             'heater_fan heater_fan': ['speed'],
@@ -84,8 +86,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
                 'state',
                 'print_duration',
                 'filename',
-                'total_duration',
-                'info',
+                'total_duration'
             ],
         }
 
@@ -189,12 +190,26 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.extruder_publisher_.publish(msg)
         self.get_logger().info('Publishing Extruder message : %s' % (msg))
 
+    def publish_motion_report(self, time):
+        motion_dict = self.status['motion_report']
+        msg = MotionReport()
+        msg.stamp = time.to_msg()
+        msg.x=motion_dict['live_position'][0]
+        msg.y=motion_dict['live_position'][1]
+        msg.z=motion_dict['live_position'][2]
+        msg.e=motion_dict['live_position'][3]
+        msg.velocity = motion_dict['live_velocity']
+        self.motion_report_publisher_.publish(msg)
+        self.get_logger().info('Publishing MotionReport message : %s' % (msg))
+
     def printer_callback(self, keys, time):
         for key in keys:
             if key == 'heater_bed':
                 self.publish_heater_bed(time)
             elif key == 'extruder':
                 self.publish_extruder(time)
+            elif key == 'motion_report':
+                self.publish_motion_report(time)
             else:
                 self.get_logger().warning('No publisher implemented for key: %s' % (key))
 
