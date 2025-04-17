@@ -48,6 +48,9 @@ from printer_interfaces.msg import HeaterBed
 from printer_interfaces.msg import Extruder
 from printer_interfaces.msg import MotionReport
 from printer_interfaces.msg import Fans
+from printer_interfaces.msg import FilamentSwitchSensor
+from printer_interfaces.msg import PrintStats
+from printer_interfaces.msg import DisplayStatus
 
 
 class Notifications(StrEnum):
@@ -67,6 +70,9 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.extruder_publisher_ = self.create_publisher(Extruder, 'printer/extruder', 10)
         self.motion_report_publisher_ = self.create_publisher(MotionReport, 'printer/motion_report', 10)
         self.fans_publisher_ = self.create_publisher(Fans, 'printer/fans', 10)
+        self.print_stats_publisher_ = self.create_publisher(PrintStats, 'printer/print_stats', 10)
+        self.filament_sensor_publisher_ = self.create_publisher(FilamentSwitchSensor, 'printer/filament_sensor', 10)
+        self.display_status_publisher_ = self.create_publisher(DisplayStatus, 'printer/display_status', 10)
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
@@ -157,7 +163,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         elif method == Notifications.STATUS_UPDATE:
             updateNestedDict(self.status, data[0])
             updated_keys = data[0].keys()
-            time = data[1]
+            time = self.get_clock().now()
             tasks.append(self.printer_callback(updated_keys, time))
         elif method == Notifications.FILES_CHANGED:
             self.files = data[0]
