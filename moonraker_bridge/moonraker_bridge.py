@@ -21,7 +21,6 @@
 
 import asyncio
 from enum import StrEnum
-import logging
 
 # https://github.com/cmroche/moonraker-api
 # a good code quality project example https://github.com/frap129/klipmi
@@ -45,14 +44,6 @@ import rclpy
 from rclpy.node import Node
 
 from std_msgs.msg import String
-
-
-logging.basicConfig(
-    level=logging.WARNING, format='%(name)s - %(levelname)s - %(message)s'
-)
-logging.getLogger('moonraker_api').setLevel(logging.INFO)
-logging.getLogger(__name__).setLevel(logging.INFO)
-_LOGGER = logging.getLogger(__name__)
 
 
 class PrinterState(StrEnum):
@@ -90,10 +81,11 @@ class MoonrakerBridge(MoonrakerListener,Node):
             'gcode_move': ['extrude_factor', 'speed_factor', 'homing_origin'],
             'motion_report': ['live_position', 'live_velocity'],
             'fan': ['speed'],
-            'heater_fan hotend_fan': ['speed'],
+            'heater_fan heater_fan': ['speed'],
+            'controller_fan controller_fan': ['speed'],
             'heater_bed': ['temperature', 'target', 'power'],
             'extruder': ['temperature', 'target', 'power'],
-            'filament_switch_sensor Filament_Runout_Sensor': ['filament_detected'],
+            'filament_switch_sensor runout_sensor': ['filament_detected'],
             'display_status': ['progress'],
             'print_stats': [
                 'state',
@@ -120,14 +112,13 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
     async def stop(self) -> None:
         """Stop the websocket connection."""
-        _LOGGER.info('Stopping')
         self.running = False
         await self.__updateState(PrinterState.STOPPED)
         await self.client.disconnect()
 
     async def state_changed(self, state: str) -> None:
         """Notifies of changing websocket state."""
-        _LOGGER.debug('Stated changed to %s', state)
+        self.get_logger().debug('Stated changed to %s' % (state))
         tasks: List[Coroutine] = []
         printerState = PrinterState.NOT_READY
         if state == WEBSOCKET_STATE_CONNECTING:
@@ -135,11 +126,10 @@ class MoonrakerBridge(MoonrakerListener,Node):
         elif state == WEBSOCKET_STATE_CONNECTED:
             tasks.append(self.__subscribe())
             tasks.append(self.__updateKlippyStatus())
-            printerState = PrinterState.READY
         elif state == WEBSOCKET_STATE_STOPPING:
             pass
         elif state == WEBSOCKET_STATE_STOPPED:
-            _LOGGER.info('Websocket closed')
+            _LOGGER.warning('Websocket closed')
             printerState = PrinterState.STOPPED
         elif state == WEBSOCKET_CONNECTION_TIMEOUT:
             printerState = PrinterState.MOONRAKER_ERR
@@ -155,7 +145,6 @@ class MoonrakerBridge(MoonrakerListener,Node):
         """Notifies of state updates."""
         tasks: List[Coroutine] = []
         if method == Notifications.KLIPPY_READY:
-            tasks.append(self.__updatePrinterStatus())
             tasks.append(self.__subscribe())
             tasks.append(self.__updateKlippyStatus())
             tasks.append(self.__updateState(PrinterState.READY))
@@ -172,34 +161,39 @@ class MoonrakerBridge(MoonrakerListener,Node):
         await asyncio.gather(*tasks)
 
     def state_callback(self, state):
-        _LOGGER.info('Callback: State changed to %s', state)
+        self.get_logger().info('State changed to %s' % (state))
 
     def printer_callback(self, status):
-        _LOGGER.info('got status: %s', status)
+        self.get_logger().info('Got status: %s' % (status))
 
     def files_callback(self, files):
-        _LOGGER.info('Files callback triggered but not implemented')
+        self.get_logger().warning('Files callback triggered but not implemented')
 
     async def __subscribe(self):
         await self.client.call_method('printer.objects.subscribe', objects=self.objects)
-        _LOGGER.info('Subscriptions setup.')
+        self.get_logger().info('Moonraker subscriptions setup.')
 
     async def __updateState(self, state: PrinterState):
-        self.state = state
-        self.state_callback(state)
+        if state != self.state:
+            self.state = state
+            self.state_callback(state)
     
     async def __updateKlippyStatus(self):
         state = await self.client.get_klipper_status()
         if state == "ready":
+            self.get_logger().info('The printer is ready')
             await self.__updatePrinterStatus()
             await self.state_callback(PrinterState.READY)
         elif state == "shutdown" or state == "disconnected":
+            self.get_logger().warning('The printer is on error!')
             await self.state_callback(PrinterState.KLIPPER_ERR)
 
     async def __updatePrinterStatus(self):
+        self.get_logger().info('Querying printer status')
         self.status = (
             await self.client.call_method("printer.objects.query", objects=self.objects)
         )["status"]
+        self.get_logger().info('Printer status obtained:\n %s' % (self.status))
 
 
 async def run(args=None):
