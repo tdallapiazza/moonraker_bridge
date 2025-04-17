@@ -43,9 +43,9 @@ from .utils import updateNestedDict
 import rclpy
 from rclpy.node import Node
 
-from std_msgs.msg import String
 from printer_interfaces.msg import PrinterState
 from printer_interfaces.msg import HeaterBed
+from printer_interfaces.msg import Extruder
 
 class Notifications(StrEnum):
     KLIPPY_READY = "notify_klippy_ready"
@@ -61,6 +61,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         super().__init__('moonraker_publisher')
         self.printer_state_publisher_ = self.create_publisher(PrinterState, 'printer/state', 10)
         self.heater_bed_publisher_ = self.create_publisher(HeaterBed, 'printer/heater_bed', 10)
+        self.extruder_publisher_ = self.create_publisher(Extruder, 'printer/extruder', 10)
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
@@ -178,10 +179,22 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.heater_bed_publisher_.publish(msg)
         self.get_logger().info('Publishing HeaterBed message : %s' % (msg))
 
+    def publish_extruder(self, time):
+        extruder_dict = self.status['extruder']
+        msg = Extruder()
+        msg.stamp = time.to_msg()
+        msg.temperature=extruder_dict['temperature']
+        msg.target = extruder_dict['target']
+        msg.power_pwm = extruder_dict['power']
+        self.extruder_publisher_.publish(msg)
+        self.get_logger().info('Publishing Extruder message : %s' % (msg))
+
     def printer_callback(self, keys, time):
         for key in keys:
             if key == 'heater_bed':
                 self.publish_heater_bed(time)
+            elif key == 'extruder':
+                self.publish_extruder(time)
             else:
                 self.get_logger().warning('No publisher implemented for key: %s' % (key))
 
@@ -213,7 +226,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.status = (
             await self.client.call_method("printer.objects.query", objects=self.objects)
         )["status"]
-        self.get_logger().debug('Printer status obtained:\n %s' % (self.status))
+        self.get_logger().info('Printer status obtained:\n %s' % (self.status))
         self.printer_callback(self.objects.keys(),self.get_clock().now())
         
 
