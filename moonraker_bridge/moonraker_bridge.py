@@ -44,7 +44,8 @@ import rclpy
 from rclpy.node import Node
 
 from std_msgs.msg import String
-from printer_interfaces.msg import PrinterState 
+from printer_interfaces.msg import PrinterState
+from printer_interfaces.msg import HeaterBed
 
 class Notifications(StrEnum):
     KLIPPY_READY = "notify_klippy_ready"
@@ -59,6 +60,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
     def __init__(self):
         super().__init__('moonraker_publisher')
         self.printer_state_publisher_ = self.create_publisher(PrinterState, 'printer/state', 10)
+        self.printer_heater_bed_publisher_ = self.create_publisher(HeaterBed, 'printer/heater_bed', 10)
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
@@ -137,6 +139,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         elif method == Notifications.KLIPPY_DISCONNECTED:
             tasks.append(self.__updateState(PrinterState.KLIPPER_ERR))
         elif method == Notifications.STATUS_UPDATE:
+            self.get_logger().info('keys %s' % (data[0].keys()))
             updateNestedDict(self.status, data[0])
             tasks.append(self.printer_callback(self.status))
         elif method == Notifications.FILES_CHANGED:
