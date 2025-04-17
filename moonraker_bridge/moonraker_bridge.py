@@ -60,7 +60,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
     def __init__(self):
         super().__init__('moonraker_publisher')
         self.printer_state_publisher_ = self.create_publisher(PrinterState, 'printer/state', 10)
-        self.printer_heater_bed_publisher_ = self.create_publisher(HeaterBed, 'printer/heater_bed', 10)
+        self.heater_bed_publisher_ = self.create_publisher(HeaterBed, 'printer/heater_bed', 10)
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
@@ -139,24 +139,39 @@ class MoonrakerBridge(MoonrakerListener,Node):
         elif method == Notifications.KLIPPY_DISCONNECTED:
             tasks.append(self.__updateState(PrinterState.KLIPPER_ERR))
         elif method == Notifications.STATUS_UPDATE:
-            self.get_logger().info('keys %s' % (data[0].keys()))
             updateNestedDict(self.status, data[0])
-            tasks.append(self.printer_callback(self.status))
+            updated_keys = data[0].keys()
+            time = data[1]
+            tasks.append(self.printer_callback(updated_keys, time))
         elif method == Notifications.FILES_CHANGED:
             self.files = data[0]
             tasks.append(self.files_callback(self.files))
         await asyncio.gather(*tasks)
 
-    def state_callback(self, state):
+    def publish_state(self, state, prev_state, time):
         msg = PrinterState()
-        msg.stamp = self.get_clock().now().to_msg()
-        msg.previous_state=self.prev_state
+        msg.stamp = time.to_msg()
+        msg.previous_state=prev_state
         msg.current_state = state
         self.printer_state_publisher_.publish(msg)
         self.get_logger().info('Publishing PrinterState message : %s' % (msg.current_state))
 
-    def printer_callback(self, status):
-        self.get_logger().info('Got status: %s' % (status))
+    def publish_heater_bed(self, time):
+        bed_dict = self.status['heater_bed']
+        msg = HeaterBed()
+        msg.stamp = time.to_msg()
+        msg.temperature=bed_dict['temperature']
+        msg.target = bed_dict['target']
+        msg.power_pwm = bed_dict['power']
+        self.heater_bed_publisher_.publish(msg)
+        self.get_logger().info('Publishing HeaterBed message : %s' % (msg))
+
+    def printer_callback(self, keys, time):
+        for key in keys:
+            if key == 'heater_bed':
+                self.publish_heater_bed(time)
+            else:
+                self.get_logger().warning('No publisher implemented for key: %s' % (key))
 
     def files_callback(self, files):
         self.get_logger().warning('Files callback triggered but not implemented')
@@ -169,7 +184,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         if state != self.state:
             self.prev_state = self.state
             self.state = state
-            self.state_callback(state)
+            self.publish_state(state, self.prev_state, self.get_clock().now())
     
     async def __updateKlippyStatus(self):
         state = await self.client.get_klipper_status()
@@ -186,7 +201,10 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.status = (
             await self.client.call_method("printer.objects.query", objects=self.objects)
         )["status"]
-        self.get_logger().info('Printer status obtained:\n %s' % (self.status))
+        self.get_logger().debug('Printer status obtained:\n %s' % (self.status))
+        self.publish_heater_bed(self.get_clock().now())
+        
+
 
 
 async def run(args=None):
