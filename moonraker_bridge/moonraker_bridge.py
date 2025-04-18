@@ -65,6 +65,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
     def __init__(self):
         super().__init__('moonraker_publisher')
+        # Publishers
         self.printer_state_publisher_ = self.create_publisher(PrinterState, 'printer/state', 10)
         self.heater_bed_publisher_ = self.create_publisher(HeaterBed, 'printer/heater_bed', 10)
         self.extruder_publisher_ = self.create_publisher(Extruder, 'printer/extruder', 10)
@@ -73,6 +74,8 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.print_stats_publisher_ = self.create_publisher(PrintStats, 'printer/print_stats', 10)
         self.filament_sensor_publisher_ = self.create_publisher(FilamentSwitchSensor, 'printer/filament_sensor', 10)
         self.display_status_publisher_ = self.create_publisher(DisplayStatus, 'printer/display_status', 10)
+        
+        # Other members
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
@@ -81,6 +84,8 @@ class MoonrakerBridge(MoonrakerListener,Node):
             'localhost',
             7125,
         )
+
+        # List of objects
         self.objects = {
             'motion_report': ['live_position', 'live_velocity'],
             'fan': ['speed'],
@@ -100,7 +105,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
 
     async def start(self) -> None:
-        """Start the websocket connection."""
+        """Start the websocket connection. Recursively retry if can not connect."""
         conn=False
         try:
             conn = await self.client.connect()
@@ -116,7 +121,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         return conn
 
     async def stop(self) -> None:
-        """Stop the websocket connection."""
+        """Stop the websocket connection ant try to restart."""
         self.running = False
         await self.__updateState(PrinterState.STOPPED)
         await self.client.disconnect()
@@ -146,7 +151,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
     async def on_exception(self, exception: BaseException) -> None:
         """Notifies of exceptions from the websocket run loop."""
-        self.get_logger().warning('Received exception from API websocket %s', str(exception))
+        self.get_logger().warning('Received exception from API websocket %s' % (str(exception)))
         raise exception
 
     async def on_notification(self, method: str, data: any) -> None:
@@ -219,6 +224,31 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.fans_publisher_.publish(msg)
         self.get_logger().info('Publishing Fans message : %s' % (msg))
 
+    def publish_filament_sensor(self, time):
+        msg = FilamentSwitchSensor()
+        msg.stamp = time.to_msg()
+        msg.filament_detected = self.status['filament_switch_sensor runout_sensor']['filament_detected']
+        self.filament_sensor_publisher_.publish(msg)
+        self.get_logger().info('Publishing FilamentSensor : %s' % (msg))
+
+    def publish_display_status(self, time):
+        msg = DisplayStatus()
+        msg.stamp = time.to_msg()
+        msg.progress = self.status['display_status']['progress']
+        self.display_status_publisher_.publish(msg)
+        self.get_logger().info('Publishing DisplayStatus : %s' % (msg))
+
+    def publish_print_stats(self, time):
+        msg = PrintStats()
+        print_stats = self.status['print_stats']
+        msg.stamp = time.to_msg()
+        msg.state = print_stats['state']
+        msg.filename = print_stats['filename']
+        msg.print_duration = print_stats['print_duration']
+        msg.total_duration = print_stats['total_duration']
+        self.print_stats_publisher_.publish(msg)
+        self.get_logger().info('Publishing PrintStats :%s' % (msg))
+
     def printer_callback(self, keys, time):
         for key in keys:
             if key == 'heater_bed':
@@ -229,6 +259,12 @@ class MoonrakerBridge(MoonrakerListener,Node):
                 self.publish_motion_report(time)
             elif key == 'fan' or key == 'heater_fan heater_fan' or key == 'controller_fan controller_fan':
                 self.publish_fans(time)
+            elif key == 'filament_switch_sensor runout_sensor':
+                self.publish_filament_sensor(time)
+            elif key == 'display_status':
+                self.publish_display_status(time)
+            elif key == 'print_stats':
+                self.publish_print_stats(time)
             else:
                 self.get_logger().warning('No publisher implemented for key: %s' % (key))
 
