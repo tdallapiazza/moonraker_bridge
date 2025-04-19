@@ -20,6 +20,7 @@
 
 
 import asyncio
+import nest_asyncio
 from enum import StrEnum
 
 # https://github.com/cmroche/moonraker-api
@@ -51,6 +52,9 @@ from printer_interfaces.msg import Fans
 from printer_interfaces.msg import FilamentSwitchSensor
 from printer_interfaces.msg import PrintStats
 from printer_interfaces.msg import DisplayStatus
+from printer_interfaces.srv import SetBedTemperature
+
+nest_asyncio.apply()
 
 
 class Notifications(StrEnum):
@@ -74,6 +78,9 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.print_stats_publisher_ = self.create_publisher(PrintStats, 'printer/print_stats', 10)
         self.filament_sensor_publisher_ = self.create_publisher(FilamentSwitchSensor, 'printer/filament_sensor', 10)
         self.display_status_publisher_ = self.create_publisher(DisplayStatus, 'printer/display_status', 10)
+
+        # Services
+        self.set_bed_temperature_srv = self.create_service(SetBedTemperature, 'printer/srv/set_bed_temperature', self.set_bed_temperature)
         
         # Other members
         self.running = False
@@ -102,6 +109,15 @@ class MoonrakerBridge(MoonrakerListener,Node):
                 'total_duration'
             ],
         }
+
+    def set_bed_temperature(self, request, response):
+        params = {"script": f'SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET={request.temperature}'}
+        response.result= 'OK'
+        res = asyncio.run(self.client.call_method("printer.gcode.script", **params))
+        # res will include the error as a dictionary so cast in in a string
+        response.result = str(res)
+        self.get_logger().debug('Setting bed temperature to : %s' % (request.temperature))
+        return response
 
 
     async def start(self) -> None:
@@ -162,9 +178,9 @@ class MoonrakerBridge(MoonrakerListener,Node):
             tasks.append(self.__updateKlippyStatus())
             tasks.append(self.__updateState(PrinterState.READY))
         elif method == Notifications.KLIPPY_SHUTDOWN:
-            tasks.append(self.__updateState(PrinterState.KLIPPER_ERR))
+            tasks.append(self.__updateKlippyStatus())
         elif method == Notifications.KLIPPY_DISCONNECTED:
-            tasks.append(self.__updateState(PrinterState.KLIPPER_ERR))
+            tasks.append(self.__updateKlippyStatus())
         elif method == Notifications.STATUS_UPDATE:
             updateNestedDict(self.status, data[0])
             updated_keys = data[0].keys()
@@ -181,7 +197,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         msg.previous_state=prev_state
         msg.current_state = state
         self.printer_state_publisher_.publish(msg)
-        self.get_logger().info('Publishing PrinterState message : %s' % (msg.current_state))
+        self.get_logger().debug('Publishing PrinterState message : %s' % (msg.current_state))
 
     def publish_heater_bed(self, time):
         bed_dict = self.status['heater_bed']
@@ -191,7 +207,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         msg.target = bed_dict['target']
         msg.power_pwm = bed_dict['power']
         self.heater_bed_publisher_.publish(msg)
-        self.get_logger().info('Publishing HeaterBed message : %s' % (msg))
+        self.get_logger().debug('Publishing HeaterBed message : %s' % (msg))
 
     def publish_extruder(self, time):
         extruder_dict = self.status['extruder']
@@ -201,7 +217,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         msg.target = extruder_dict['target']
         msg.power_pwm = extruder_dict['power']
         self.extruder_publisher_.publish(msg)
-        self.get_logger().info('Publishing Extruder message : %s' % (msg))
+        self.get_logger().debug('Publishing Extruder message : %s' % (msg))
 
     def publish_motion_report(self, time):
         motion_dict = self.status['motion_report']
@@ -213,7 +229,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         msg.e=motion_dict['live_position'][3]
         msg.velocity = motion_dict['live_velocity']
         self.motion_report_publisher_.publish(msg)
-        self.get_logger().info('Publishing MotionReport message : %s' % (msg))
+        self.get_logger().debug('Publishing MotionReport message : %s' % (msg))
 
     def publish_fans(self, time):
         msg = Fans()
@@ -222,21 +238,21 @@ class MoonrakerBridge(MoonrakerListener,Node):
         msg.heater_fan_speed = self.status['heater_fan heater_fan']['speed']
         msg.controller_fan_speed = self.status['controller_fan controller_fan']['speed']
         self.fans_publisher_.publish(msg)
-        self.get_logger().info('Publishing Fans message : %s' % (msg))
+        self.get_logger().debug('Publishing Fans message : %s' % (msg))
 
     def publish_filament_sensor(self, time):
         msg = FilamentSwitchSensor()
         msg.stamp = time.to_msg()
         msg.filament_detected = self.status['filament_switch_sensor runout_sensor']['filament_detected']
         self.filament_sensor_publisher_.publish(msg)
-        self.get_logger().info('Publishing FilamentSensor : %s' % (msg))
+        self.get_logger().debug('Publishing FilamentSensor : %s' % (msg))
 
     def publish_display_status(self, time):
         msg = DisplayStatus()
         msg.stamp = time.to_msg()
         msg.progress = self.status['display_status']['progress']
         self.display_status_publisher_.publish(msg)
-        self.get_logger().info('Publishing DisplayStatus : %s' % (msg))
+        self.get_logger().debug('Publishing DisplayStatus : %s' % (msg))
 
     def publish_print_stats(self, time):
         msg = PrintStats()
@@ -247,7 +263,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         msg.print_duration = print_stats['print_duration']
         msg.total_duration = print_stats['total_duration']
         self.print_stats_publisher_.publish(msg)
-        self.get_logger().info('Publishing PrintStats :%s' % (msg))
+        self.get_logger().debug('Publishing PrintStats :%s' % (msg))
 
     def printer_callback(self, keys, time):
         for key in keys:
@@ -296,7 +312,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.status = (
             await self.client.call_method("printer.objects.query", objects=self.objects)
         )["status"]
-        self.get_logger().info('Printer status obtained:\n %s' % (self.status))
+        self.get_logger().debug('Printer status obtained:\n %s' % (self.status))
         self.printer_callback(self.objects.keys(),self.get_clock().now())
         
 
