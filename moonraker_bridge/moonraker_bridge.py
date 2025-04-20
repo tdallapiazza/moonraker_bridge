@@ -53,6 +53,14 @@ from printer_interfaces.msg import FilamentSwitchSensor
 from printer_interfaces.msg import PrintStats
 from printer_interfaces.msg import DisplayStatus
 from printer_interfaces.srv import SetBedTemperature
+from printer_interfaces.srv import SetExtruderTemperature
+from printer_interfaces.srv import ExecuteGCode
+from printer_interfaces.srv import StartPrintJob
+from printer_interfaces.srv import PausePrintJob
+from printer_interfaces.srv import ResumePrintJob
+from printer_interfaces.srv import CancelPrintJob
+from printer_interfaces.srv import QueryEndStops
+
 
 nest_asyncio.apply()
 
@@ -68,20 +76,26 @@ class Notifications(StrEnum):
 class MoonrakerBridge(MoonrakerListener,Node):
 
     def __init__(self):
-        super().__init__('moonraker_publisher')
+        super().__init__('moonraker_bridge')
         # Publishers
-        self.printer_state_publisher_ = self.create_publisher(PrinterState, 'printer/state', 10)
-        self.heater_bed_publisher_ = self.create_publisher(HeaterBed, 'printer/heater_bed', 10)
-        self.extruder_publisher_ = self.create_publisher(Extruder, 'printer/extruder', 10)
-        self.motion_report_publisher_ = self.create_publisher(MotionReport, 'printer/motion_report', 10)
-        self.fans_publisher_ = self.create_publisher(Fans, 'printer/fans', 10)
-        self.print_stats_publisher_ = self.create_publisher(PrintStats, 'printer/print_stats', 10)
-        self.filament_sensor_publisher_ = self.create_publisher(FilamentSwitchSensor, 'printer/filament_sensor', 10)
-        self.display_status_publisher_ = self.create_publisher(DisplayStatus, 'printer/display_status', 10)
+        self.printer_state_publisher_ = self.create_publisher(PrinterState, f'{self.get_name()}/status/state', 10)
+        self.heater_bed_publisher_ = self.create_publisher(HeaterBed, f'{self.get_name()}/status/heater_bed', 10)
+        self.extruder_publisher_ = self.create_publisher(Extruder, f'{self.get_name()}/status/extruder', 10)
+        self.motion_report_publisher_ = self.create_publisher(MotionReport, f'{self.get_name()}/status/motion_report', 10)
+        self.fans_publisher_ = self.create_publisher(Fans, f'{self.get_name()}/status/fans', 10)
+        self.print_stats_publisher_ = self.create_publisher(PrintStats, f'{self.get_name()}/status/print_stats', 10)
+        self.filament_sensor_publisher_ = self.create_publisher(FilamentSwitchSensor, f'{self.get_name()}/status/filament_sensor', 10)
+        self.display_status_publisher_ = self.create_publisher(DisplayStatus, f'{self.get_name()}/status/display_status', 10)
 
         # Services
-        self.set_bed_temperature_srv = self.create_service(SetBedTemperature, 'printer/srv/set_bed_temperature', self.set_bed_temperature)
-        
+        self.set_bed_temperature_srv = self.create_service(SetBedTemperature, f'{self.get_name()}/commands/set_bed_temperature', self.set_bed_temperature)
+        self.set_extruder_temperature_srv = self.create_service(SetExtruderTemperature, f'{self.get_name()}/commands/set_extruder_temperature', self.set_extruder_temperature)
+        self.execute_gcode_srv = self.create_service(ExecuteGCode, f'{self.get_name()}/commands/execute_gcode', self.execute_gcode)
+        self.start_print_job_srv = self.create_service(StartPrintJob, f'{self.get_name()}/commands/start_print_job', self.start_print_job)
+        self.pause_print_job_srv = self.create_service(PausePrintJob, f'{self.get_name()}/commands/pause_print_job', self.pause_print_job)
+        self.resume_print_job_srv = self.create_service(ResumePrintJob, f'{self.get_name()}/commands/resume_print_job', self.resume_print_job)
+        self.cancel_print_job_srv = self.create_service(CancelPrintJob, f'{self.get_name()}/commands/cancel_print_job', self.cancel_print_job)
+
         # Other members
         self.running = False
         self.status: dict = {}
@@ -112,11 +126,55 @@ class MoonrakerBridge(MoonrakerListener,Node):
 
     def set_bed_temperature(self, request, response):
         params = {"script": f'SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET={request.temperature}'}
-        response.result= 'OK'
         res = asyncio.run(self.client.call_method("printer.gcode.script", **params))
         # res will include the error as a dictionary so cast in in a string
         response.result = str(res)
         self.get_logger().debug('Setting bed temperature to : %s' % (request.temperature))
+        return response
+    
+    def set_extruder_temperature(self, request, response):
+        params = {"script": f'SET_HEATER_TEMPERATURE HEATER=extruder TARGET={request.temperature}'}
+        res = asyncio.run(self.client.call_method("printer.gcode.script", **params))
+        # res will include the error as a dictionary so cast in in a string
+        response.result = str(res)
+        self.get_logger().debug('Setting extruder temperature to : %s' % (request.temperature))
+        return response
+    
+    def execute_gcode(self, request, response):
+        params = {"script": request.commands}
+        res = asyncio.run(self.client.call_method("printer.gcode.script", **params))
+        # res will include the error as a dictionary so cast in in a string
+        response.result = str(res)
+        self.get_logger().debug('Executing gcode : %s' % (request.commands))
+        return response
+    
+    def start_print_job(self, request, response):
+        params = {"filename": request.filename}
+        res = asyncio.run(self.client.call_method("printer.print.start", **params))
+        # res will include the error as a dictionary so cast in in a string
+        response.result = str(res)
+        self.get_logger().debug('Starting print job : %s' % (request.filename))
+        return response
+    
+    def pause_print_job(self, request, response):
+        res = asyncio.run(self.client.call_method("printer.print.pause"))
+        # res will include the error as a dictionary so cast in in a string
+        response.result = str(res)
+        self.get_logger().debug('Pause print job')
+        return response
+    
+    def resume_print_job(self, request, response):
+        res = asyncio.run(self.client.call_method("printer.print.resume"))
+        # res will include the error as a dictionary so cast in in a string
+        response.result = str(res)
+        self.get_logger().debug('Resume print job')
+        return response
+    
+    def cancel_print_job(self, request, response):
+        res = asyncio.run(self.client.call_method("printer.print.cancel"))
+        # res will include the error as a dictionary so cast in in a string
+        response.result = str(res)
+        self.get_logger().debug('Cancel print job')
         return response
 
 
