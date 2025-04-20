@@ -95,6 +95,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.pause_print_job_srv = self.create_service(PausePrintJob, f'{self.get_name()}/commands/pause_print_job', self.pause_print_job)
         self.resume_print_job_srv = self.create_service(ResumePrintJob, f'{self.get_name()}/commands/resume_print_job', self.resume_print_job)
         self.cancel_print_job_srv = self.create_service(CancelPrintJob, f'{self.get_name()}/commands/cancel_print_job', self.cancel_print_job)
+        self.query_endstops_srv = self.create_service(QueryEndStops, f'{self.get_name()}/commands/query_endstops', self.query_endstops)
 
         # Other members
         self.running = False
@@ -175,6 +176,15 @@ class MoonrakerBridge(MoonrakerListener,Node):
         # res will include the error as a dictionary so cast in in a string
         response.result = str(res)
         self.get_logger().debug('Cancel print job')
+        return response
+    
+    def query_endstops(self, request, response):
+        res = asyncio.run(self.client.call_method("printer.query_endstops.status"))
+        # res will include the error as a dictionary so cast in in a string
+        response.x = str(res.get("x",""))
+        response.y = str(res.get("y",""))
+        response.z = str(res.get("z",""))
+        self.get_logger().info('Querying endstops status : %s' % (str(res)))
         return response
 
 
