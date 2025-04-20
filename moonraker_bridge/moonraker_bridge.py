@@ -184,7 +184,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         response.x = str(res.get("x",""))
         response.y = str(res.get("y",""))
         response.z = str(res.get("z",""))
-        self.get_logger().info('Querying endstops status : %s' % (str(res)))
+        self.get_logger().debug('Querying endstops status : %s' % (str(res)))
         return response
 
 
