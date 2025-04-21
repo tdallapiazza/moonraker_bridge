@@ -42,22 +42,8 @@ from .utils import updateNestedDict
 import rclpy
 from rclpy.node import Node
 
-from printer_interfaces.msg import PrinterState
-from printer_interfaces.msg import HeaterBed
-from printer_interfaces.msg import Extruder
-from printer_interfaces.msg import MotionReport
-from printer_interfaces.msg import Fans
-from printer_interfaces.msg import FilamentSwitchSensor
-from printer_interfaces.msg import PrintStats
-from printer_interfaces.msg import DisplayStatus
-from printer_interfaces.srv import SetBedTemperature
-from printer_interfaces.srv import SetExtruderTemperature
-from printer_interfaces.srv import ExecuteGCode
-from printer_interfaces.srv import StartPrintJob
-from printer_interfaces.srv import PausePrintJob
-from printer_interfaces.srv import ResumePrintJob
-from printer_interfaces.srv import CancelPrintJob
-from printer_interfaces.srv import QueryEndStops
+from printer_interfaces.msg import PrinterState, HeaterBed, Extruder, MotionReport, Fans, FilamentSwitchSensor, PrintStats, DisplayStatus
+from printer_interfaces.srv import SetBedTemperature, SetExtruderTemperature, ExecuteGCode, StartPrintJob, PausePrintJob, ResumePrintJob, CancelPrintJob, QueryEndStops, GetPrinterInfo
 
 
 nest_asyncio.apply()
@@ -94,6 +80,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.resume_print_job_srv = self.create_service(ResumePrintJob, f'{self.get_name()}/commands/resume_print_job', self.resume_print_job)
         self.cancel_print_job_srv = self.create_service(CancelPrintJob, f'{self.get_name()}/commands/cancel_print_job', self.cancel_print_job)
         self.query_endstops_srv = self.create_service(QueryEndStops, f'{self.get_name()}/commands/query_endstops', self.query_endstops)
+        self.get_printer_info_srv = self.create_service(GetPrinterInfo, f'{self.get_name()}/commands/get_printer_info', self.get_printer_info)
 
         # Other members
         self.running = False
@@ -184,6 +171,17 @@ class MoonrakerBridge(MoonrakerListener,Node):
         response.y = str(res.get("y",""))
         response.z = str(res.get("z",""))
         self.get_logger().debug('Querying endstops status : %s' % (str(res)))
+        return response
+    
+    def get_printer_info(self, request, response):
+        response.hostname = self.printer_info['hostname']
+        response.config_file = self.printer_info['config_file']
+        response.software_version = self.printer_info['software_version']
+        response.cpu_info = self.printer_info['cpu_info']
+        response.manufacturer = self.printer_info['manufacturer']
+        response.model = self.printer_info['model']
+        response.location = self.printer_info['location']
+        self.get_logger().info('Serving printer info : %s' % (str(response)))
         return response
 
 
