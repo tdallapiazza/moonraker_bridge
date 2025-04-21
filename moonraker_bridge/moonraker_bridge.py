@@ -26,7 +26,7 @@ from enum import StrEnum
 # https://github.com/cmroche/moonraker-api
 # a good code quality project example https://github.com/frap129/klipmi
 
-from typing import Callable, Coroutine, Dict, List, Literal
+from typing import Coroutine, List
 
 from moonraker_api import MoonrakerClient, MoonrakerListener
 from moonraker_api.const import (
@@ -36,9 +36,7 @@ from moonraker_api.const import (
     WEBSOCKET_STATE_STOPPED,
     WEBSOCKET_STATE_STOPPING,
 )
-from moonraker_api.websockets.websocketclient import (
-    ClientNotAuthenticatedError,
-)
+
 from .utils import updateNestedDict
 
 import rclpy
@@ -101,6 +99,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.running = False
         self.status: dict = {}
         self.files: dict = {}
+        self.printer_info: dict = {}
         self.client = MoonrakerClient(
             self,
             'localhost',
@@ -371,6 +370,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
             self.get_logger().info('The printer is ready')
             await self.__updatePrinterStatus()
             await self.__updateState(PrinterState.READY)
+            await self.__updatePrinterInfo()
         elif state == "shutdown" or state == "disconnected":
             self.get_logger().warning('The printer is on error!')
             await self.__updateState(PrinterState.KLIPPER_ERR)
@@ -383,6 +383,11 @@ class MoonrakerBridge(MoonrakerListener,Node):
         self.get_logger().debug('Printer status obtained:\n %s' % (self.status))
         self.printer_callback(self.objects.keys(),self.get_clock().now())
         
+    async def __updatePrinterInfo(self):
+        self.printer_info = await self.client.call_method("printer.info")
+        details = (await self.client.call_method("printer.objects.query", objects={'gcode_macro printer_details': ['manufacturer', 'model', 'location']}))['status']['gcode_macro printer_details']
+        self.printer_info.update(details)
+        self.get_logger().debug('Printer info obtained:\n %s' % (self.printer_info))
 
 
 
