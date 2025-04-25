@@ -174,14 +174,15 @@ class MoonrakerBridge(MoonrakerListener,Node):
         return response
     
     def get_printer_info(self, request, response):
-        response.hostname = self.printer_info['hostname']
-        response.config_file = self.printer_info['config_file']
-        response.software_version = self.printer_info['software_version']
-        response.cpu_info = self.printer_info['cpu_info']
-        response.manufacturer = self.printer_info['manufacturer']
-        response.model = self.printer_info['model']
-        response.location = self.printer_info['location']
-        self.get_logger().info('Serving printer info : %s' % (str(response)))
+        response.state = self.state
+        response.hostname = self.printer_info.get('hostname', '')
+        response.config_file = self.printer_info.get('config_file','')
+        response.software_version = self.printer_info.get('software_version','')
+        response.cpu_info = self.printer_info.get('cpu_info','')
+        response.manufacturer = self.printer_info.get('manufacturer','')
+        response.model = self.printer_info.get('model','')
+        response.location = self.printer_info.get('location','')
+        self.get_logger().debug('Serving printer info : %s' % (str(response)))
         return response
 
 
@@ -257,12 +258,12 @@ class MoonrakerBridge(MoonrakerListener,Node):
         await asyncio.gather(*tasks)
 
     def publish_state(self, state, prev_state, time):
+        self.get_logger().info('Publishing PrinterState message : %s' % (state))
         msg = PrinterState()
         msg.stamp = time.to_msg()
         msg.previous_state=prev_state
         msg.current_state = state
         self.printer_state_publisher_.publish(msg)
-        self.get_logger().debug('Publishing PrinterState message : %s' % (msg.current_state))
 
     def publish_heater_bed(self, time):
         bed_dict = self.status['heater_bed']
@@ -329,6 +330,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         msg.total_duration = print_stats['total_duration']
         self.print_stats_publisher_.publish(msg)
         self.get_logger().debug('Publishing PrintStats :%s' % (msg))
+
 
     def printer_callback(self, keys, time):
         for key in keys:
