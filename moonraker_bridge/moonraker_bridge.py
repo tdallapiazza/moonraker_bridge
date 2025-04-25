@@ -170,7 +170,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         response.x = str(res.get("x",""))
         response.y = str(res.get("y",""))
         response.z = str(res.get("z",""))
-        self.get_logger().debug('Querying endstops status : %s' % (str(res)))
+        self.get_logger().info('Querying endstops status : %s' % (str(res)))
         return response
     
     def get_printer_info(self, request, response):
@@ -182,6 +182,13 @@ class MoonrakerBridge(MoonrakerListener,Node):
         response.manufacturer = self.printer_info.get('manufacturer','')
         response.model = self.printer_info.get('model','')
         response.location = self.printer_info.get('location','')
+        response.bed_x_dimension = self.printer_info.get('bed_x',0.0)
+        response.bed_y_dimension = self.printer_info.get('bed_y',0.0)
+        response.bed_rated_power = self.printer_info.get('bed_rated_power',0.0)
+        response.hotend_manufacturer = self.printer_info.get('hotend_manufacturer','')
+        response.hotend_model = self.printer_info.get('hotend_model','')
+        response.hotend_rated_power = self.printer_info.get('hotend_rated_power',0.0)
+        response.hotend_nozzle_diameter = self.printer_info.get('hotend_nozzle_diameter',0.0)
         self.get_logger().debug('Serving printer info : %s' % (str(response)))
         return response
 
@@ -385,7 +392,7 @@ class MoonrakerBridge(MoonrakerListener,Node):
         
     async def __updatePrinterInfo(self):
         self.printer_info = await self.client.call_method("printer.info")
-        details = (await self.client.call_method("printer.objects.query", objects={'gcode_macro printer_details': ['manufacturer', 'model', 'location']}))['status']['gcode_macro printer_details']
+        details = (await self.client.call_method("printer.objects.query", objects={'gcode_macro printer_details': None}))['status']['gcode_macro printer_details']
         self.printer_info.update(details)
         self.get_logger().debug('Printer info obtained:\n %s' % (self.printer_info))
 
